@@ -1,0 +1,14 @@
+[package]
+name = "sshfs-rs-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.87"
+async-trait = "0.1.82"
+env_logger = "0.11.5"
+log = "0.4.22"
+russh = "0.45.0"
+russh-keys = "0.45.0"
+russh-sftp = "2.0.3"
+tokio = "1.40.0"

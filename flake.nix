@@ -47,6 +47,7 @@
             rust-analyzer
             fuse3
             lldb
+            sqlite
           ];
 
           env = {

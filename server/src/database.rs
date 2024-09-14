@@ -1,9 +1,9 @@
+use anyhow::{Context, Result};
 use lazy_static::lazy_static;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, Connection};
 use std::{env, sync::Arc};
-use anyhow::{Context, Result};
 
 // Define a trait for the database connection pool
 pub trait DatabasePool {
@@ -11,7 +11,6 @@ pub trait DatabasePool {
 }
 
 pub struct GlobalDatabasePool;
-
 
 // Implement the trait for the specific type
 impl DatabasePool for GlobalDatabasePool {
@@ -37,7 +36,6 @@ impl DatabasePool for MockDatabasePool {
 }
 
 fn initialize_database(conn: &Connection) -> Result<()> {
-
     // 检查 Users 表是否存在
     let mut stmt = conn
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='Users'")
@@ -65,6 +63,27 @@ fn initialize_database(conn: &Connection) -> Result<()> {
             params!["admin", hashed_admin_password, "admin"],
         )
         .context("Failed to insert initial data into Users table")?;
+
+        // 检查 AuditLogs 表是否存在
+        let mut stmt = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='AuditLogs'")
+            .context("Failed to prepare statement to check for AuditLogs table")?;
+
+        let audit_logs_table_exists: bool = stmt.exists(params![])?;
+
+        if !audit_logs_table_exists {
+            conn.execute(
+            "CREATE TABLE AuditLogs (
+                log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username INTEGER NOT NULL references Users(username),
+                action TEXT NOT NULL CHECK(action IN ('Open', 'Close', 'Read', 'Write', 'Remove', 'OpenDir', 'ReadDir', 'MakeDir', 'RemoveDir', 'RealPath', 'Rename')),
+                target TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )",
+            params![],
+            )
+            .context("Failed to create AuditLogs table")?;
+        }
     }
 
     Ok(())
@@ -86,11 +105,9 @@ lazy_static! {
     };
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     #[test]
     fn test_initialize_database() {

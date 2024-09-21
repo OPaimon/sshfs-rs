@@ -73,7 +73,7 @@ impl VirtualRoot {
 impl Default for VirtualRoot {
     fn default() -> Self {
         Self {
-            virtual_root: std::env::current_dir().unwrap().join("./"),
+            virtual_root: std::env::current_dir().unwrap().join("./test_data_dir/"),
         }
     }
 }

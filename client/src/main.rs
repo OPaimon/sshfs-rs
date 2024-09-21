@@ -1,103 +1,49 @@
-use std::sync::Arc;
+mod sftp_client;
+mod filesystem;
 
-use async_trait::async_trait;
-use log::{error, info, LevelFilter};
-use russh::keys::*;
-use russh::*;
-use russh_sftp::client::SftpSession;
-use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+use anyhow::{anyhow, Context, Result};
+use clap::{Arg, ArgAction, Command};
+use fuser::MountOption;
 
-struct Client;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let addr = "localhost:2002";
+    let username = "admin";
+    let password = "admin_password";
+    let path = "/";
+    let session = sftp_client::make_ssh_session_by_password(username, password, addr)?;
+    let fs = filesystem::sshfs::new(session, path.into());
 
-#[async_trait]
-impl client::Handler for Client {
-    type Error = anyhow::Error;
-
-    async fn check_server_key(
-        &mut self,
-        server_public_key: &key::PublicKey,
-    ) -> Result<bool, Self::Error> {
-        info!("check_server_key: {:?}", server_public_key);
-        Ok(true)
+    let matches = Command::new("hello")
+        .author("Christopher Berner")
+        .arg(
+            Arg::new("MOUNT_POINT")
+                .required(true)
+                .index(1)
+                .help("Act as a client, and mount FUSE at given path"),
+        )
+        .arg(
+            Arg::new("auto_unmount")
+                .long("auto_unmount")
+                .action(ArgAction::SetTrue)
+                .help("Automatically unmount on process exit"),
+        )
+        .arg(
+            Arg::new("allow-root")
+                .long("allow-root")
+                .action(ArgAction::SetTrue)
+                .help("Allow root user to access filesystem"),
+        )
+        .get_matches();
+    env_logger::init();
+    let mountpoint = matches.get_one::<String>("MOUNT_POINT").unwrap();
+    let mut options = vec![MountOption::RO, MountOption::FSName("hello".to_string())];
+    if matches.get_flag("auto_unmount") {
+        options.push(MountOption::AutoUnmount);
     }
-
-    async fn data(
-        &mut self,
-        channel: ChannelId,
-        data: &[u8],
-        _session: &mut client::Session,
-    ) -> Result<(), Self::Error> {
-        info!("data on channel {:?}: {}", channel, data.len());
-        Ok(())
+    if matches.get_flag("allow-root") {
+        options.push(MountOption::AllowRoot);
     }
-}
+    fuser::mount2(fs, mountpoint, &options).unwrap();
 
-#[tokio::main]
-async fn main() {
-    env_logger::builder()
-        .filter_level(LevelFilter::Debug)
-        .init();
-
-    let config = russh::client::Config::default();
-    let sh = Client {};
-    let mut session = russh::client::connect(Arc::new(config), ("localhost", 6001), sh)
-        .await
-        .unwrap();
-    if session.authenticate_password("paimon", "wen20041014").await.unwrap() {
-        let channel = session.channel_open_session().await.unwrap();
-        channel.request_subsystem(true, "sftp").await.unwrap();
-        let sftp = SftpSession::new(channel.into_stream()).await.unwrap();
-        info!("current path: {:?}", sftp.canonicalize(".").await.unwrap());
-
-        // create dir and symlink
-        let path = "./some_kind_of_dir";
-        let symlink = "./symlink";
-
-        sftp.create_dir(path).await.unwrap();
-        sftp.symlink(path, symlink).await.unwrap();
-
-        info!("dir info: {:?}", sftp.metadata(path).await.unwrap());
-        info!(
-            "symlink info: {:?}",
-            sftp.symlink_metadata(path).await.unwrap()
-        );
-
-        // scanning directory
-        for entry in sftp.read_dir(".").await.unwrap() {
-            info!("file in directory: {:?}", entry.file_name());
-        }
-
-        sftp.remove_file(symlink).await.unwrap();
-        sftp.remove_dir(path).await.unwrap();
-
-        // interaction with i/o
-        let filename = "test_new.txt";
-        let mut file = sftp.create(filename).await.unwrap();
-        info!("metadata by handle: {:?}", file.metadata().await.unwrap());
-
-        file.write_all(b"magic text").await.unwrap();
-        info!("flush: {:?}", file.flush().await); // or file.sync_all()
-        info!(
-            "current cursor position: {:?}",
-            file.stream_position().await
-        );
-
-        let mut str = String::new();
-
-        file.rewind().await.unwrap();
-        file.read_to_string(&mut str).await.unwrap();
-        file.rewind().await.unwrap();
-
-        info!(
-            "our magical contents: {}, after rewind: {:?}",
-            str,
-            file.stream_position().await
-        );
-
-        file.shutdown().await.unwrap();
-        sftp.remove_file(filename).await.unwrap();
-
-        // should fail because handle was closed
-        error!("should fail: {:?}", file.read_u8().await);
-    }
+    Ok(())
 }

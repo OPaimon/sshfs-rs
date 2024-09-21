@@ -17,7 +17,7 @@ use russh::server::{Auth, Msg, Server as _, Session};
 use russh::{Channel, ChannelId, MethodSet};
 use russh_keys::encoding::Encoding;
 use russh_sftp::protocol::{
-    Data, File, FileAttributes, Handle, Name, OpenFlags, Status, StatusCode, Version
+    Attrs, Data, File, FileAttributes, Handle, Name, OpenFlags, RealPath, Status, StatusCode, Version
 };
 use tokio::sync::Mutex;
 
@@ -180,13 +180,49 @@ impl russh_sftp::server::Handler for SftpSession {
         let path = self.virtual_root.to_real_path(&path).unwrap();
         let handle_str = format!("handle_{}", id);
         let file = open_options.open(path.clone()).unwrap();
-        self.handles.insert(handle_str.clone(), path.to_str().unwrap().to_string());    
+        self.handles
+            .insert(handle_str.clone(), path.to_str().unwrap().to_string());
         self.file_handles.insert(handle_str.clone(), file);
         Ok(Handle {
             id,
             handle: handle_str,
         })
     }
+
+    async fn lstat(&mut self, id: u32, path: String) -> Result<Attrs, Self::Error> {
+        let real_path = self
+            .virtual_root
+            .to_real_path(&self.cwd_offset.join(path))
+            .unwrap();
+        let metadata = fs::symlink_metadata(real_path).unwrap();
+        let attrs = FileAttributes::from(&metadata);
+        Ok(Attrs {
+            id: id,
+            attrs: attrs,
+        })
+    }
+
+    async fn fstat(&mut self, id: u32, handle: String) -> Result<Attrs, Self::Error> {
+    match self.handles.get(&handle) {
+        Some(vpath) => {
+            let real_path = self
+            .virtual_root
+            .to_real_path(&self.cwd_offset.join(vpath))
+            .unwrap();
+            let metadata = fs::symlink_metadata(real_path).unwrap();
+            let attrs = FileAttributes::from(&metadata);
+            Ok(Attrs {
+                id: id,
+                attrs: attrs,
+            })
+        }
+        None => {
+            Err(Self::Error::from(StatusCode::NoSuchFile))
+        }
+    }
+
+    }
+
 
     async fn setstat(
         &mut self,
@@ -267,7 +303,7 @@ impl russh_sftp::server::Handler for SftpSession {
     }
 
     async fn opendir(&mut self, id: u32, path: String) -> Result<Handle, Self::Error> {
-        // 使用winscp打开空文件夹会出错显示返回空表 很奇怪 本来就是空的啊 
+        // 使用winscp打开空文件夹会出错显示返回空表 很奇怪 本来就是空的啊
         info!("opendir: {}", path);
         self.root_dir_read_done = false;
         let path = self.cwd_offset.join(path);
@@ -318,7 +354,10 @@ impl russh_sftp::server::Handler for SftpSession {
         path: String,
         attrs: FileAttributes,
     ) -> Result<Status, Self::Error> {
-        let real_path = self.virtual_root.to_real_path(&self.cwd_offset.join(path)).unwrap();
+        let real_path = self
+            .virtual_root
+            .to_real_path(&self.cwd_offset.join(path))
+            .unwrap();
         fs::create_dir(real_path).unwrap();
         Ok(Status {
             id,
@@ -329,7 +368,10 @@ impl russh_sftp::server::Handler for SftpSession {
     }
 
     async fn rmdir(&mut self, id: u32, path: String) -> Result<Status, Self::Error> {
-        let real_path = self.virtual_root.to_real_path(&self.cwd_offset.join(path)).unwrap();
+        let real_path = self
+            .virtual_root
+            .to_real_path(&self.cwd_offset.join(path))
+            .unwrap();
         fs::remove_dir(real_path).unwrap();
         Ok(Status {
             id,
@@ -345,10 +387,7 @@ impl russh_sftp::server::Handler for SftpSession {
             .virtual_root
             .to_real_path(&self.cwd_offset.join(path))
             .unwrap();
-        let ans = self
-            .virtual_root
-            .to_virtual_path(&real_path)
-            .unwrap();
+        let ans = self.virtual_root.to_virtual_path(&real_path).unwrap();
         if !real_path.exists() {
             return Err(StatusCode::NoSuchFile);
         }
@@ -364,14 +403,33 @@ impl russh_sftp::server::Handler for SftpSession {
         })
     }
 
+    async fn stat(&mut self, id: u32, path: String) -> Result<Attrs, Self::Error> {
+        let real_path = self
+            .virtual_root
+            .to_real_path(&self.cwd_offset.join(path))
+            .unwrap();
+        let metadata = fs::metadata(real_path).unwrap();
+        let attrs = FileAttributes::from(&metadata);
+        Ok(Attrs {
+            id: id,
+            attrs: attrs,
+        })
+    }
+
     async fn rename(
         &mut self,
         id: u32,
         oldpath: String,
         newpath: String,
     ) -> Result<Status, Self::Error> {
-        let oldpath = self.virtual_root.to_real_path(&self.cwd_offset.join(oldpath)).unwrap();
-        let newpath = self.virtual_root.to_real_path(&self.cwd_offset.join(newpath)).unwrap();
+        let oldpath = self
+            .virtual_root
+            .to_real_path(&self.cwd_offset.join(oldpath))
+            .unwrap();
+        let newpath = self
+            .virtual_root
+            .to_real_path(&self.cwd_offset.join(newpath))
+            .unwrap();
         fs::rename(oldpath, newpath).unwrap();
         Ok(Status {
             id,
@@ -389,9 +447,9 @@ mod tests {
 
     use super::*;
     use russh::server::Server as _;
-    use tracing::{info, trace, warn, error, debug};
-    use tracing_subscriber::fmt::format::FmtSpan;
+    use tracing::{debug, error, info, trace, warn};
     use tracing_subscriber::fmt;
+    use tracing_subscriber::fmt::format::FmtSpan;
 
     fn setup_tracing() {
         tracing_subscriber::fmt()

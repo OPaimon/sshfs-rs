@@ -175,7 +175,10 @@ impl russh_sftp::server::Handler for SftpSession {
         pflags: OpenFlags,
         attrs: FileAttributes,
     ) -> Result<Handle, Self::Error> {
-        let open_options: fs::OpenOptions = pflags.into();
+        let mut open_options: fs::OpenOptions = pflags.into();
+        if pflags.contains(OpenFlags::CREATE) {
+            open_options.write(true);
+        }
         let path = self.cwd_offset.join(filename);
         let path = self.virtual_root.to_real_path(&path).unwrap();
         let handle_str = format!("handle_{}", id);
@@ -408,12 +411,16 @@ impl russh_sftp::server::Handler for SftpSession {
             .virtual_root
             .to_real_path(&self.cwd_offset.join(path))
             .unwrap();
-        let metadata = fs::metadata(real_path).unwrap();
-        let attrs = FileAttributes::from(&metadata);
-        Ok(Attrs {
-            id: id,
-            attrs: attrs,
-        })
+        match fs::metadata(real_path) {
+            Ok(metadata) => {
+                let attrs = FileAttributes::from(&metadata);
+                Ok(Attrs {
+                    id: id,
+                    attrs: attrs,
+                })
+            }
+            Err(_) => Err(StatusCode::NoSuchFile),
+        }
     }
 
     async fn rename(

@@ -6,6 +6,9 @@ use clap::{Arg, ArgAction, Command};
 use fuser::MountOption;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // let addr = "localhost:22";
+    // let username = "test";
+    // let password = "test";
     let addr = "localhost:2002";
     let username = "admin";
     let password = "admin_password";
@@ -36,7 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .get_matches();
     env_logger::init();
     let mountpoint = matches.get_one::<String>("MOUNT_POINT").unwrap();
-    let mut options = vec![MountOption::RO, MountOption::FSName("hello".to_string())];
+    let mut options = vec![MountOption::RW, MountOption::FSName("hello".to_string())];
     if matches.get_flag("auto_unmount") {
         options.push(MountOption::AutoUnmount);
     }

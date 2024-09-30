@@ -1,15 +1,12 @@
-use chrono::{DateTime, Local, TimeZone};
-use russh_sftp::protocol::FileAttr;
-use russh_sftp::protocol::FileAttributes;
+use chrono::{DateTime, Local};
 use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
-use std::{fs, time};
+use std::time::SystemTime;
+use std::fs;
 use users::{get_group_by_gid, get_user_by_uid};
 
-use russh_sftp::de;
 
 pub struct VirtualRoot {
     virtual_root: PathBuf,
@@ -36,7 +33,7 @@ impl VirtualRoot {
         let relative_path = real_path
             .strip_prefix(&self.virtual_root)
             .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
-        Ok(PathBuf::from("/").join(relative_path.to_path_buf()))
+        Ok(PathBuf::from("/").join(relative_path))
     }
 
     pub fn to_real_path(&self, virtual_path: &Path) -> io::Result<PathBuf> {
@@ -103,8 +100,8 @@ fn mode_to_rwx(mode: u32) -> String {
 
 fn format_permissions(permissions: fs::Permissions) -> String {
     let mode = permissions.mode();
-    let mut rwx = mode_to_rwx(mode);
-    rwx
+    
+    mode_to_rwx(mode)
 }
 
 fn format_time(time: SystemTime) -> String {

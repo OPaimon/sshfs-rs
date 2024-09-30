@@ -65,7 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let password = matches.get_one::<String>("password").unwrap();
     let path = "/";
     let session = sftp_client::make_ssh_session_by_password(username, password, addr)?;
-    let fs = filesystem::sshfs::new(session, path.into());
+    let fs = filesystem::Sshfs::new(session, path.into());
     env_logger::init();
     let mountpoint = matches.get_one::<String>("MOUNT_POINT").unwrap();
     let mut options = vec![MountOption::RW, MountOption::FSName("sshfs-rs".to_string())];

@@ -2,10 +2,9 @@ use std::sync::Arc;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, Connection};
-use tracing::{span, Event, Subscriber};
+use tracing::{Event, Subscriber};
 use tracing_subscriber::{layer::Context, Layer};
 
-use crate::database::{MockDatabasePool, DatabasePool};
 
 // 自定义 Layer，将日志插入到 AuditLogs 表中
 pub struct DatabaseLogger {
@@ -105,6 +104,8 @@ mod tests {
     use rusqlite::params;
     use tracing_subscriber::layer::SubscriberExt;
 
+    use crate::database::{MockDatabasePool, DatabasePool};
+
     #[test]
     fn test_log_action_to_audit_logs() {
         let manager = SqliteConnectionManager::memory();
@@ -143,18 +144,13 @@ mod tests {
 
     #[test]
     fn test_database_logger() {
-        let manager = SqliteConnectionManager::memory();
+        let _manager = SqliteConnectionManager::memory();
         let pool = MockDatabasePool::get_pool();
 
         let logger = DatabaseLogger::new(pool.clone());
         let subscriber = tracing_subscriber::Registry::default().with(logger);
 
         tracing::subscriber::set_global_default(subscriber).expect("Failed to set subscriber");
-
-        let span = span!(tracing::Level::INFO, "test_span", username = "test", action = "read", target = "file.txt");
-        let _enter = span.enter();
-
-        tracing::info!("test log");
         tracing::info!(username = "admin", action = "read", target = "file.txt", "test log");
 
         let conn = pool.get().expect("Failed to get connection from pool");

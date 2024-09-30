@@ -1,5 +1,4 @@
 use fuser::{FileAttr, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, Request};
-use itertools::Itertools;
 use libc::ENOENT;
 use log::warn;
 use ssh2::{ErrorCode, File, OpenFlags, OpenType, Session, Sftp};
@@ -109,7 +108,7 @@ impl Inodes {
     fn del_inode(&mut self, inode: u64) -> Option<u64> {
         self.list.remove(&inode).map(|_| inode)
     }
-    fn rename(&mut self, old_path: &Path, new_path: &Path) -> bool {
+    fn _rename(&mut self, old_path: &Path, new_path: &Path) -> bool {
         let inode = self.get_inode(old_path);
         if inode.is_none() {
             return false;
@@ -140,7 +139,7 @@ impl FHandlers {
     }
 }
 
-pub struct sshfs {
+pub struct Sshfs {
     _session: Session,
     _root_path: PathBuf,
     sftp: Sftp,
@@ -148,7 +147,7 @@ pub struct sshfs {
     file_handles: FHandlers,
 }
 
-impl sshfs {
+impl Sshfs {
     pub fn new(session: Session, root_path: PathBuf) -> Self {
         let mut inodes = Inodes::default();
         let sftp = session.sftp().unwrap();
@@ -190,7 +189,7 @@ impl sshfs {
     }
 }
 
-impl Filesystem for sshfs {
+impl Filesystem for Sshfs {
     fn lookup(
         &mut self,
         _req: &Request<'_>,
@@ -318,12 +317,12 @@ impl Filesystem for sshfs {
     fn read(
             &mut self,
             _req: &Request<'_>,
-            ino: u64,
+            _ino: u64,
             fh: u64,
             offset: i64,
             size: u32,
-            flags: i32,
-            lock_owner: Option<u64>,
+            _flags: i32,
+            _lock_owner: Option<u64>,
             reply: ReplyData,
         ) {
         let file = match self.file_handles.get(fh) {
@@ -366,13 +365,13 @@ impl Filesystem for sshfs {
     fn write(
             &mut self,
             _req: &Request<'_>,
-            ino: u64,
+            _ino: u64,
             fh: u64,
             offset: i64,
             data: &[u8],
-            write_flags: u32,
-            flags: i32,
-            lock_owner: Option<u64>,
+            _write_flags: u32,
+            _flags: i32,
+            _lock_owner: Option<u64>,
             reply: fuser::ReplyWrite,
         ) {
         let file = match self.file_handles.get(fh) {
@@ -413,7 +412,7 @@ impl Filesystem for sshfs {
             name: &std::ffi::OsStr,
             mode: u32,
             umask: u32,
-            rdev: u32,
+            _rdev: u32,
             reply: ReplyEntry,
         ) {
         if mode & libc::S_IFMT != libc::S_IFREG {
@@ -429,7 +428,7 @@ impl Filesystem for sshfs {
                 path.push(Path::new(name));
                 let mode = mode & (!umask | libc::S_IFMT); //只保留文件类型
                 match self.sftp.open_mode(&path, OpenFlags::CREATE, mode as i32, OpenType::File) {
-                    Ok(file) => {
+                    Ok(_) => {
                         match self.get_attr(path.as_path()) {
                             Ok(attr) => {
                                 reply.entry(&Duration::new(1, 0), &attr, 0);
@@ -550,7 +549,7 @@ mod tests {
         let path = Path::new("/test");
         let inode = inodes.add(path);
         let new_path = Path::new("/new_test");
-        assert!(inodes.rename(path, new_path));
+        assert!(inodes._rename(path, new_path));
         assert_eq!(inodes.get_inode(path), None);
         assert_eq!(inodes.get_inode(new_path), Some(inode));
         assert_eq!(inodes.get_path(inode), Some(new_path.to_path_buf()));

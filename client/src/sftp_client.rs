@@ -34,6 +34,6 @@ mod tests {
     #[test]
     fn test_make_session() {
         let addr = "127.0.0.1:2002";
-        let sess = make_ssh_session_by_password("admin", "admin_password", addr).unwrap();
+        let _sess = make_ssh_session_by_password("admin", "admin_password", addr).unwrap();
     }
 }

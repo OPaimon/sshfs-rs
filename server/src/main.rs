@@ -5,15 +5,13 @@ mod fs;
 mod sftp_server;
 
 use auth::Auther;
-use clap::{Arg, ArgAction, Command, Subcommand};
+use clap::{Arg, Command};
 use log::LevelFilter;
-use rusqlite::Result;
 use russh::server::Server;
 use russh_keys::key::KeyPair;
-use std::default;
 use std::sync::Arc;
 use std::time::Duration;
-use std::{env, error::Error};
+use std::env;
 use tracing_subscriber::layer::SubscriberExt;
 
 use crate::audit::DatabaseLogger;
@@ -112,7 +110,7 @@ async fn main() {
             tracing::subscriber::set_global_default(subscriber).expect("Failed to set subscriber");
 
             let mut server = crate::sftp_server::Server::<GlobalDatabasePool> {
-                pool: GlobalDatabasePool::get_pool(),
+                // pool: GlobalDatabasePool::get_pool(),
                 _marker: std::marker::PhantomData,
             };
 
@@ -129,7 +127,7 @@ async fn main() {
                     let username = register_matches.get_one::<String>("username").unwrap();
                     let password = register_matches.get_one::<String>("password").unwrap();
                     auth.register(username, password).unwrap();
-                    ()
+                    
                 }
                 Some(("update-password", update_password_matches)) => {
                     let username = update_password_matches
@@ -143,7 +141,7 @@ async fn main() {
                         .unwrap();
                     auth.update_user_password(username, password, old_password)
                         .unwrap();
-                    ()
+                    
                 }
                 _ => {}
             }

@@ -1,4 +1,4 @@
-use crate::database::{DatabasePool, GlobalDatabasePool};
+use crate::database::DatabasePool;
 use anyhow::Result;
 use bcrypt::{hash, verify};
 use r2d2::Pool;

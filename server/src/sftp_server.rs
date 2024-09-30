@@ -1,34 +1,27 @@
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::SocketAddr;
-use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
-use std::{env, fs, string};
+use std::fs;
 
 use async_trait::async_trait;
-use itertools::process_results;
-use log::{error, LevelFilter};
-use r2d2::Pool;
-use r2d2_sqlite::SqliteConnectionManager;
-use russh::keys::key::KeyPair;
-use russh::server::{Auth, Msg, Server as _, Session};
+use log::error;
+use russh::server::{Auth, Msg, Session};
 use russh::{Channel, ChannelId, MethodSet};
-use russh_keys::encoding::Encoding;
 use russh_sftp::protocol::{
-    Attrs, Data, File, FileAttributes, Handle, Name, OpenFlags, RealPath, Status, StatusCode, Version
+    Attrs, Data, File, FileAttributes, Handle, Name, OpenFlags, Status, StatusCode, Version
 };
 use tokio::sync::Mutex;
-use tracing::{debug, trace, warn, info};
+use tracing::info;
 
 use crate::auth::{Auther, User};
-use crate::database::{DatabasePool, GlobalDatabasePool};
+use crate::database::DatabasePool;
 use crate::fs::{format_file_info, get_file_file_attributes, VirtualRoot};
 
 #[derive(Clone)]
 pub struct Server<P: DatabasePool + 'static> {
-    pub pool: Arc<Pool<SqliteConnectionManager>>,
+    // pub pool: Arc<Pool<SqliteConnectionManager>>,
     pub _marker: std::marker::PhantomData<P>,
 }
 
@@ -135,7 +128,7 @@ impl SftpSession {
         }
     }
 
-    fn check_req_done(&mut self, id: u32) -> bool {
+    fn check_req_done(&mut self, _id: u32) -> bool {
         // match self.req_done.get(&id) {
         //     | Some(v) => *v,
         //     | None => {
@@ -189,7 +182,7 @@ impl russh_sftp::server::Handler for SftpSession {
         id: u32,
         filename: String,
         pflags: OpenFlags,
-        attrs: FileAttributes,
+        _attrs: FileAttributes,
     ) -> Result<Handle, Self::Error> {
         let mut open_options: fs::OpenOptions = pflags.into();
         if pflags.contains(OpenFlags::CREATE) {
@@ -220,8 +213,8 @@ impl russh_sftp::server::Handler for SftpSession {
         let attrs = FileAttributes::from(&metadata);
         info!(username = self.user.clone(), action = "Lstat", target = target, "User action logged");
         Ok(Attrs {
-            id: id,
-            attrs: attrs,
+            id,
+            attrs,
         })
     }
 
@@ -236,12 +229,12 @@ impl russh_sftp::server::Handler for SftpSession {
             let attrs = FileAttributes::from(&metadata);
             info!(username = self.user.clone(), action = "Fstat", target = real_path.to_str().unwrap(), "User action logged");
             Ok(Attrs {
-                id: id,
-                attrs: attrs,
+                id,
+                attrs,
             })
         }
         None => {
-            Err(Self::Error::from(StatusCode::NoSuchFile))
+            Err(StatusCode::NoSuchFile)
         }
     }
 
@@ -250,9 +243,9 @@ impl russh_sftp::server::Handler for SftpSession {
 
     async fn setstat(
         &mut self,
-        id: u32,
-        path: String,
-        attrs: FileAttributes,
+        _id: u32,
+        _path: String,
+        _attrs: FileAttributes,
     ) -> Result<Status, Self::Error> {
         // 状态相关的暂时不写了
         Err(self.unimplemented())
@@ -268,7 +261,7 @@ impl russh_sftp::server::Handler for SftpSession {
         let file = self.file_handles.get_mut(&handle).unwrap();
         let file_size = file.metadata().unwrap().len();
         if offset >= file_size {
-            return Err(Self::Error::from(StatusCode::Eof));
+            return Err(StatusCode::Eof);
         }
         let mut buf = vec![0; len as usize];
         file.seek(SeekFrom::Start(offset)).unwrap();
@@ -292,7 +285,7 @@ impl russh_sftp::server::Handler for SftpSession {
     ) -> Result<Status, Self::Error> {
         let file = match self.file_handles.get_mut(&handle) {
             Some(file) => file,
-            None => return Err(Self::Error::from(StatusCode::Eof)),
+            None => return Err(StatusCode::Eof),
         };
 
         // 将文件指针移动到指定的偏移量
@@ -303,7 +296,7 @@ impl russh_sftp::server::Handler for SftpSession {
 
         // 检查是否所有数据都已写入
         if bytes_written < data.len() {
-            return Err(Self::Error::from(StatusCode::Eof));
+            return Err(StatusCode::Eof);
         }
         let path = self.handles.get(&handle).unwrap();
         info!(username = self.user.clone(), action = "Write", target = path, "User action logged");
@@ -354,7 +347,7 @@ impl russh_sftp::server::Handler for SftpSession {
             false => {
                 let vpath = self.handles.get(&handle).unwrap();
                 let vpath = Path::new(vpath);
-                let real_path = self.virtual_root.to_real_path(&vpath).unwrap();
+                let real_path = self.virtual_root.to_real_path(vpath).unwrap();
                 let real_path = real_path.canonicalize().unwrap();
                 // 读取目录
                 let entries = fs::read_dir(real_path.clone()).unwrap();
@@ -374,7 +367,7 @@ impl russh_sftp::server::Handler for SftpSession {
                 info!(username = self.user.clone(), action = "ReadDir", target = real_path.to_str().unwrap(), "User action logged");
                 Ok(Name { id, files })
             }
-            true => Err(Self::Error::from(StatusCode::Eof)),
+            true => Err(StatusCode::Eof),
         }
     }
 
@@ -382,7 +375,7 @@ impl russh_sftp::server::Handler for SftpSession {
         &mut self,
         id: u32,
         path: String,
-        attrs: FileAttributes,
+        _attrs: FileAttributes,
     ) -> Result<Status, Self::Error> {
         let real_path = self
             .virtual_root
@@ -430,8 +423,8 @@ impl russh_sftp::server::Handler for SftpSession {
             id,
             files: vec![File {
                 filename: ans.to_str().unwrap().to_string(),
-                longname: longname,
-                attrs: attrs,
+                longname,
+                attrs,
             }],
         })
     }
@@ -446,8 +439,8 @@ impl russh_sftp::server::Handler for SftpSession {
                 let attrs = FileAttributes::from(&metadata);
                 info!(username = self.user.clone(), action = "Stat", target = real_path.to_str().unwrap(), "User action logged");
                 Ok(Attrs {
-                    id: id,
-                    attrs: attrs,
+                    id,
+                    attrs,
                 })
             }
             Err(_) => Err(StatusCode::NoSuchFile),
@@ -485,17 +478,14 @@ mod tests {
     use crate::database::MockDatabasePool;
 
     use super::*;
+    use std::time::Duration;
+    use russh_keys::key::KeyPair;
+    use log::LevelFilter;
     use russh::server::Server as _;
-    use tracing::{debug, error, info, trace, warn};
-    use tracing_subscriber::fmt;
-    use tracing_subscriber::fmt::format::FmtSpan;
+    
+    
 
-    fn setup_tracing() {
-        tracing_subscriber::fmt()
-            .with_span_events(FmtSpan::FULL)
-            .with_max_level(tracing::Level::TRACE)
-            .init();
-    }
+
 
     #[tokio::test]
     async fn test_ssh_server() {
@@ -506,9 +496,8 @@ mod tests {
             .is_test(true)
             .try_init();
 
-        let pool = MockDatabasePool::get_pool();
         let mut server = Server::<MockDatabasePool> {
-            pool: pool.clone(),
+            // pool: pool.clone(),
             _marker: std::marker::PhantomData,
         };
 

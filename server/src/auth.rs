@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 pub trait Auther {
     fn register(&self, username: &str, password: &str) -> Result<()>;
-    fn authenticate(&self, username: &str, password: &str) -> Result<()>;
+    fn authenticate(&mut self, username: &str, password: &str) -> Result<()>;
     fn check_permission(&self, username: &str, permission: &str) -> Result<bool>;
     fn update_user_password(
         &self,
@@ -21,6 +21,8 @@ pub trait Auther {
 pub struct User<P: DatabasePool> {
     pool: Arc<Pool<SqliteConnectionManager>>,
     _marker: std::marker::PhantomData<P>,
+    pub username: String,
+    authed: bool,
 }
 
 unsafe impl<P: DatabasePool> Send for User<P> {}
@@ -31,12 +33,16 @@ impl<P: DatabasePool> User<P> {
         Ok(Self {
             pool,
             _marker: std::marker::PhantomData,
+            username: String::new(),
+            authed: false,
         })
     }
     pub fn new_with_pool(pool: Arc<Pool<SqliteConnectionManager>>) -> Self {
         Self {
             pool,
             _marker: std::marker::PhantomData,
+            username: String::new(),
+            authed: false,
         }
     }
 }
@@ -51,11 +57,13 @@ impl<P: DatabasePool> Auther for User<P> {
         )?;
         Ok(())
     }
-    fn authenticate(&self, username: &str, password: &str) -> Result<()> {
+    fn authenticate(&mut self, username: &str, password: &str) -> Result<()> {
         let conn = self.pool.get()?;
         let mut stmt = conn.prepare("SELECT password FROM Users WHERE username = ?")?;
         let hash: String = stmt.query_row(params![username], |row| row.get(0))?;
         if verify(password, &hash)? {
+            self.username = username.to_string();
+            self.authed = true;
             Ok(())
         } else {
             Err(anyhow::anyhow!("Invalid password"))
@@ -129,7 +137,7 @@ mod tests {
             ],
         )
         .unwrap();
-        let auth = User::<MockDatabasePool>::new_with_pool(pool);
+        let mut auth = User::<MockDatabasePool>::new_with_pool(pool);
         auth.authenticate("test", "password").unwrap();
     }
 

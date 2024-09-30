@@ -16,7 +16,7 @@ pub struct VirtualRoot {
 }
 
 impl VirtualRoot {
-    fn new(virtual_root: &Path) -> io::Result<Self> {
+    pub fn new(virtual_root: &Path) -> io::Result<Self> {
         if !virtual_root.exists() || !virtual_root.is_dir() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -69,12 +69,14 @@ impl VirtualRoot {
         Ok(())
     }
 }
-
 impl Default for VirtualRoot {
     fn default() -> Self {
-        Self {
-            virtual_root: std::env::current_dir().unwrap(),
+        let virtual_root_str = std::env::var("VIRTUAL_ROOT_PATH").unwrap_or_else(|_| ".".to_string());
+        let virtual_root = PathBuf::from(virtual_root_str);
+        if !virtual_root.exists() || !virtual_root.is_dir() {
+            panic!("Virtual root directory does not exist or is not a directory.");
         }
+        Self { virtual_root }
     }
 }
 

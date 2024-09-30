@@ -5,11 +5,11 @@ use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use std::{env, fs};
+use std::{env, fs, string};
 
 use async_trait::async_trait;
 use itertools::process_results;
-use log::{error, info, LevelFilter};
+use log::{error, LevelFilter};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use russh::keys::key::KeyPair;
@@ -20,6 +20,7 @@ use russh_sftp::protocol::{
     Attrs, Data, File, FileAttributes, Handle, Name, OpenFlags, RealPath, Status, StatusCode, Version
 };
 use tokio::sync::Mutex;
+use tracing::{debug, trace, warn, info};
 
 use crate::auth::{Auther, User};
 use crate::database::{DatabasePool, GlobalDatabasePool};
@@ -96,7 +97,8 @@ impl<P: DatabasePool> russh::server::Handler for SshSession<P> {
 
         if name == "sftp" {
             let channel = self.get_channel(channel_id).await;
-            let sftp = SftpSession::default();
+            let username = self.auther.username.clone();
+            let sftp = SftpSession::new_with_username(username);
             session.channel_success(channel_id);
             russh_sftp::server::run(channel.into_stream(), sftp).await;
         } else {
@@ -116,9 +118,23 @@ struct SftpSession {
     handles: HashMap<String, String>,
     file_handles: HashMap<String, fs::File>,
     req_done: HashMap<u32, bool>,
+    user: String,
 }
 
 impl SftpSession {
+    fn new_with_username(username: String) -> Self {
+        Self {
+            version: None,
+            root_dir_read_done: false,
+            virtual_root: VirtualRoot::default(),
+            cwd_offset: PathBuf::from("/"),
+            handles: HashMap::new(),
+            file_handles: HashMap::new(),
+            req_done: HashMap::new(),
+            user: username,
+        }
+    }
+
     fn check_req_done(&mut self, id: u32) -> bool {
         // match self.req_done.get(&id) {
         //     | Some(v) => *v,
@@ -186,6 +202,8 @@ impl russh_sftp::server::Handler for SftpSession {
         self.handles
             .insert(handle_str.clone(), path.to_str().unwrap().to_string());
         self.file_handles.insert(handle_str.clone(), file);
+        // log example:     tracing::info!(username = "admin", action = "Open", target = "Connection", "User action logged");
+        info!(username = self.user.clone(), action = "Open", target = path.to_str().unwrap(), "User action logged");
         Ok(Handle {
             id,
             handle: handle_str,
@@ -197,8 +215,10 @@ impl russh_sftp::server::Handler for SftpSession {
             .virtual_root
             .to_real_path(&self.cwd_offset.join(path))
             .unwrap();
+        let target = real_path.clone().to_str().unwrap().to_string();
         let metadata = fs::symlink_metadata(real_path).unwrap();
         let attrs = FileAttributes::from(&metadata);
+        info!(username = self.user.clone(), action = "Lstat", target = target, "User action logged");
         Ok(Attrs {
             id: id,
             attrs: attrs,
@@ -212,8 +232,9 @@ impl russh_sftp::server::Handler for SftpSession {
             .virtual_root
             .to_real_path(&self.cwd_offset.join(vpath))
             .unwrap();
-            let metadata = fs::symlink_metadata(real_path).unwrap();
+            let metadata = fs::symlink_metadata(real_path.clone()).unwrap();
             let attrs = FileAttributes::from(&metadata);
+            info!(username = self.user.clone(), action = "Fstat", target = real_path.to_str().unwrap(), "User action logged");
             Ok(Attrs {
                 id: id,
                 attrs: attrs,
@@ -257,7 +278,8 @@ impl russh_sftp::server::Handler for SftpSession {
         if bytes_read < len as usize {
             buf.truncate(bytes_read);
         }
-
+        let path = self.handles.get(&handle).unwrap();
+        info!(username = self.user.clone(), action = "Read", target = path, "User action logged");
         Ok(Data { id, data: buf })
     }
 
@@ -283,7 +305,8 @@ impl russh_sftp::server::Handler for SftpSession {
         if bytes_written < data.len() {
             return Err(Self::Error::from(StatusCode::Eof));
         }
-
+        let path = self.handles.get(&handle).unwrap();
+        info!(username = self.user.clone(), action = "Write", target = path, "User action logged");
         // 返回写入操作的状态
         Ok(Status {
             id,
@@ -296,7 +319,8 @@ impl russh_sftp::server::Handler for SftpSession {
     async fn remove(&mut self, id: u32, filename: String) -> Result<Status, Self::Error> {
         let vpath = self.cwd_offset.join(filename);
         let real_path = self.virtual_root.to_real_path(&vpath).unwrap();
-        fs::remove_file(real_path).unwrap();
+        fs::remove_file(real_path.clone()).unwrap();
+        info!(username = self.user.clone(), action = "Remove", target = real_path.to_str().unwrap(), "User action logged");
         Ok(Status {
             id,
             status_code: StatusCode::Ok,
@@ -315,6 +339,8 @@ impl russh_sftp::server::Handler for SftpSession {
             handle_str.clone(),
             path.clone().to_str().unwrap().to_string(),
         );
+        let real_path = self.virtual_root.to_real_path(&path).unwrap().to_str().unwrap().to_string();
+        info!(username = self.user.clone(), action = "OpenDir", target = real_path, "User action logged");
         Ok(Handle {
             id,
             handle: handle_str,
@@ -331,7 +357,7 @@ impl russh_sftp::server::Handler for SftpSession {
                 let real_path = self.virtual_root.to_real_path(&vpath).unwrap();
                 let real_path = real_path.canonicalize().unwrap();
                 // 读取目录
-                let entries = fs::read_dir(real_path).unwrap();
+                let entries = fs::read_dir(real_path.clone()).unwrap();
                 let mut files = vec![];
                 for entry in entries {
                     let entry = entry.unwrap();
@@ -345,6 +371,7 @@ impl russh_sftp::server::Handler for SftpSession {
                         attrs,
                     });
                 }
+                info!(username = self.user.clone(), action = "ReadDir", target = real_path.to_str().unwrap(), "User action logged");
                 Ok(Name { id, files })
             }
             true => Err(Self::Error::from(StatusCode::Eof)),
@@ -361,7 +388,8 @@ impl russh_sftp::server::Handler for SftpSession {
             .virtual_root
             .to_real_path(&self.cwd_offset.join(path))
             .unwrap();
-        fs::create_dir(real_path).unwrap();
+        fs::create_dir(real_path.clone()).unwrap();
+        info!(username = self.user.clone(), action = "MakeDir", target = real_path.to_str().unwrap(), "User action logged");
         Ok(Status {
             id,
             status_code: StatusCode::Ok,
@@ -375,7 +403,8 @@ impl russh_sftp::server::Handler for SftpSession {
             .virtual_root
             .to_real_path(&self.cwd_offset.join(path))
             .unwrap();
-        fs::remove_dir(real_path).unwrap();
+        fs::remove_dir(real_path.clone()).unwrap();
+        info!(username = self.user.clone(), action = "RemoveDir", target = real_path.to_str().unwrap(), "User action logged");
         Ok(Status {
             id,
             status_code: StatusCode::Ok,
@@ -396,6 +425,7 @@ impl russh_sftp::server::Handler for SftpSession {
         }
         let longname = format_file_info(&real_path).unwrap();
         let attrs = get_file_file_attributes(&real_path).unwrap();
+        info!(username = self.user.clone(), action = "RealPath", target = real_path.to_str().unwrap(), "User action logged");
         Ok(Name {
             id,
             files: vec![File {
@@ -411,9 +441,10 @@ impl russh_sftp::server::Handler for SftpSession {
             .virtual_root
             .to_real_path(&self.cwd_offset.join(path))
             .unwrap();
-        match fs::metadata(real_path) {
+        match fs::metadata(real_path.clone()) {
             Ok(metadata) => {
                 let attrs = FileAttributes::from(&metadata);
+                info!(username = self.user.clone(), action = "Stat", target = real_path.to_str().unwrap(), "User action logged");
                 Ok(Attrs {
                     id: id,
                     attrs: attrs,
@@ -437,7 +468,8 @@ impl russh_sftp::server::Handler for SftpSession {
             .virtual_root
             .to_real_path(&self.cwd_offset.join(newpath))
             .unwrap();
-        fs::rename(oldpath, newpath).unwrap();
+        fs::rename(oldpath.clone(), newpath).unwrap();
+        info!(username = self.user.clone(), action = "Rename", target = oldpath.to_str().unwrap(), "User action logged");
         Ok(Status {
             id,
             status_code: StatusCode::Ok,

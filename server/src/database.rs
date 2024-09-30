@@ -76,10 +76,11 @@ fn initialize_database(conn: &Connection) -> Result<()> {
             "CREATE TABLE AuditLogs (
                 log_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username INTEGER NOT NULL references Users(username),
-                action TEXT NOT NULL CHECK(action IN ('Open', 'Close', 'Read', 'Write', 'Remove', 'OpenDir', 'ReadDir', 'MakeDir', 'RemoveDir', 'RealPath', 'Rename')),
+                action TEXT NOT NULL,
                 target TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )",
+            // CHECK(action IN ('Open', 'Close', 'Read', 'Write', 'Remove', 'OpenDir', 'ReadDir', 'MakeDir', 'RemoveDir', 'RealPath', 'Rename'))
             params![],
             )
             .context("Failed to create AuditLogs table")?;

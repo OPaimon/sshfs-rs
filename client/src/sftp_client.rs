@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use ssh2::Session;
 use std::net::TcpStream;
 

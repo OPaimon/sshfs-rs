@@ -92,7 +92,7 @@ struct Inodes {
 impl Inodes {
     fn add(&mut self, path: &Path) -> u64 {
         match self.get_inode(path) {
-            Some(inode) => return inode,
+            Some(inode) => inode,
             None => {
                 self.max_inode += 1;
                 self.list.insert(self.max_inode, path.to_path_buf());
@@ -104,7 +104,7 @@ impl Inodes {
         self.list.iter().find(|(_, p)| path == *p).map(|(i, _)| *i)
     }
     fn get_path(&self, inode: u64) -> Option<PathBuf> {
-        self.list.get(&inode).map(|p| p.clone())
+        self.list.get(&inode).cloned()
     }
     fn del_inode(&mut self, inode: u64) -> Option<u64> {
         self.list.remove(&inode).map(|_| inode)
@@ -550,7 +550,7 @@ mod tests {
         let path = Path::new("/test");
         let inode = inodes.add(path);
         let new_path = Path::new("/new_test");
-        assert_eq!(inodes.rename(path, new_path), true);
+        assert!(inodes.rename(path, new_path));
         assert_eq!(inodes.get_inode(path), None);
         assert_eq!(inodes.get_inode(new_path), Some(inode));
         assert_eq!(inodes.get_path(inode), Some(new_path.to_path_buf()));

@@ -1,7 +1,7 @@
 mod sftp_client;
 mod filesystem;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::Result;
 use clap::{Arg, ArgAction, Command};
 use fuser::MountOption;
 

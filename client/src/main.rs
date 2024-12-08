@@ -5,6 +5,8 @@ use anyhow::Result;
 use clap::{Arg, ArgAction, Command};
 use fuser::MountOption;
 
+
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let matches = Command::new("sshfs")
         .author("OPaimoe")

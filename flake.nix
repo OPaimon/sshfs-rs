@@ -48,7 +48,11 @@
             fuse3
             lldb
             sqlite
-
+            gdk-pixbuf
+            gobject-introspection
+            graphene
+            gtk4
+            gtksourceview5
           ];
 
           env = {

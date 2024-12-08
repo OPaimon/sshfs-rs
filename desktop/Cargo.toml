@@ -1,0 +1,10 @@
+[package]
+name = "sshfs-rs-desktop"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sshfs-rs-client ={ path = "../client" }
+rfd = "0.15.1"
+iced = "0.13.1"
+
